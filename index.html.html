@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>❤️</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    width: 100vw; height: 100vh; overflow: hidden;
+    background: radial-gradient(ellipse at center, #2d0a1a 0%, #0a0005 100%);
+    cursor: pointer;
+  }
+  canvas { display: block; }
+  .title {
+    position: absolute; top: 8%; width: 100%; text-align: center;
+    z-index: 10; pointer-events: none;
+    color: #fff; font-size: 1.8rem; font-weight: bold; letter-spacing: 4px;
+    text-shadow: 0 0 30px rgba(255,100,130,0.8), 0 0 60px rgba(255,80,120,0.5);
+    animation: glow 1.5s ease-in-out infinite;
+  }
+  @keyframes glow {
+    0%, 100% { opacity: 0.8; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.08); }
+  }
+  .hint {
+    position: absolute; bottom: 10%; width: 100%; text-align: center;
+    z-index: 10; pointer-events: none;
+    color: rgba(255,255,255,0.5); font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+<div class="title">❤ 我 爱 你 ❤</div>
+<div class="hint">点 击 屏 幕 放 烟 花</div>
+<canvas id="c"></canvas>
+
+<script>
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+
+function resize() {
+  W = canvas.width  = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ---- 3D 爱心数据 ----
+const hearts = [];
+const PERSPECTIVE = 600;
+const VANISH_X = 0.5; // 消失点（屏幕比例）
+const VANISH_Y = 0.45;
+
+function heartPath(cx, cy, s) {
+  // 用贝塞尔曲线画爱心路径，s 是大小
+  ctx.beginPath();
+  const topY = cy - s * 0.4;
+  const bottomY = cy + s * 0.65;
+  ctx.moveTo(cx, bottomY);
+  ctx.bezierCurveTo(
+    cx - s,       cy + s * 0.2,
+    cx - s * 0.5, topY,
+    cx,           topY + s * 0.2
+  );
+  ctx.bezierCurveTo(
+    cx + s * 0.5, topY,
+    cx + s,       cy + s * 0.2,
+    cx,           bottomY
+  );
+  ctx.closePath();
+}
+
+function spawnHeart(burst) {
+  // 3D 空间中的目标位置（爱心最终飞到屏幕上的位置）
+  const tx = (Math.random() * 0.9 + 0.05) * W;
+  const ty = (Math.random() * 0.8 + 0.05) * H;
+  const tz = -100 - Math.random() * 200; // 飞过头，到屏幕"前方"
+
+  // 起点在消失点附近，z 很远
+  const sx = VANISH_X * W;
+  const sy = VANISH_Y * H;
+  const sz = 800 + Math.random() * 400;
+
+  const size = 18 + Math.random() * 35;
+  const hue = Math.random() < 0.7
+    ? 340 + Math.random() * 30  // 红色系
+    : 280 + Math.random() * 40; // 偶尔紫色
+
+  hearts.push({
+    sx, sy, sz,  // 起始 3D 位置
+    tx, ty, tz,  // 终点 3D 位置
+    x: sx, y: sy, z: sz, // 当前
+    size,
+    hue,
+    progress: 0,
+    speed: 0.004 + Math.random() * 0.012,
+    rotation: Math.random() * Math.PI * 2,
+    rotSpeed: (Math.random() - 0.5) * 0.15,
+    opacity: 1,
+    burst: burst || false,
+  });
+}
+
+function drawHeart(x, y, size, rotation, hue, alpha) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.rotate(rotation);
+
+  const grad = ctx.createRadialGradient(0, -size * 0.15, size * 0.05, 0, size * 0.2, size * 0.8);
+  grad.addColorStop(0,   `hsla(${hue}, 90%, 70%, ${alpha})`);
+  grad.addColorStop(0.5, `hsla(${hue}, 85%, 55%, ${alpha * 0.9})`);
+  grad.addColorStop(1,   `hsla(${hue}, 80%, 35%, ${alpha * 0.7})`);
+
+  ctx.fillStyle = grad;
+  ctx.shadowColor = `hsla(${hue}, 100%, 60%, ${alpha * 0.7})`;
+  ctx.shadowBlur = size * 0.6;
+  heartPath(0, 0, size);
+  ctx.fill();
+
+  // 高光
+  ctx.fillStyle = `rgba(255,255,255,${alpha * 0.25})`;
+  ctx.shadowColor = 'transparent';
+  ctx.shadowBlur = 0;
+  ctx.beginPath();
+  ctx.arc(-size * 0.15, -size * 0.2, size * 0.18, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
+function project(x, y, z) {
+  const scale = PERSPECTIVE / (PERSPECTIVE + z);
+  return {
+    sx: W / 2 + (x - W / 2) * scale,
+    sy: H / 2 + (y - H / 2) * scale,
+    scale,
+  };
+}
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+function easeOutQuart(t) { return 1 - Math.pow(1 - t, 4); }
+
+function update() {
+  for (let i = hearts.length - 1; i >= 0; i--) {
+    const h = hearts[i];
+    h.progress += h.speed;
+
+    const t = Math.min(h.progress, 1);
+    const et = easeOutQuart(t);
+
+    h.x = lerp(h.sx, h.tx, et);
+    h.y = lerp(h.sy, h.ty, et);
+    h.z = lerp(h.sz, h.tz, et);
+    h.rotation += h.rotSpeed;
+
+    // 飞近时微微变亮，飞过时淡出
+    if (t < 0.7) {
+      h.opacity = lerp(0.6, 1, t / 0.7);
+    } else {
+      h.opacity = lerp(1, 0, (t - 0.7) / 0.3);
+    }
+
+    if (t >= 1) {
+      hearts.splice(i, 1);
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, W, H);
+
+  // 背景粒子（微小的光点）
+  // 简单起见略过，下次可加
+
+  // 按 z 排序（远的先画）
+  const sorted = [...hearts].sort((a, b) => b.z - a.z);
+
+  for (const h of sorted) {
+    const p = project(h.x, h.y, h.z);
+    const screenSize = h.size * p.scale;
+    drawHeart(p.sx, p.sy, screenSize, h.rotation, h.hue, h.opacity);
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ---- 持续生成爱心 ----
+function continuousSpawn() {
+  spawnHeart();
+  setTimeout(continuousSpawn, 200 + Math.random() * 400);
+}
+continuousSpawn();
+
+// 初始爆发一波
+for (let i = 0; i < 30; i++) {
+  setTimeout(() => spawnHeart(true), i * 60);
+}
+
+// ---- 点击爆发 ----
+canvas.addEventListener('click', (e) => {
+  // 把消失点临时移到点击位置附近
+  const oldVX = VANISH_X, oldVY = VANISH_Y;
+  // 在点击位置爆发 15 个爱心
+  for (let i = 0; i < 18; i++) {
+    const h = {
+      sx: e.clientX, sy: e.clientY, sz: 600 + Math.random() * 300,
+      tx: (Math.random() * 0.9 + 0.05) * W,
+      ty: (Math.random() * 0.8 + 0.05) * H,
+      tz: -150 - Math.random() * 200,
+      x: e.clientX, y: e.clientY, z: 600 + Math.random() * 300,
+      size: 20 + Math.random() * 40,
+      hue: Math.random() < 0.7 ? 340 + Math.random() * 30 : 350 + Math.random() * 30,
+      progress: 0,
+      speed: 0.008 + Math.random() * 0.02,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.2,
+      opacity: 1,
+      burst: true,
+    };
+    hearts.push(h);
+  }
+});
+
+// 触摸支持
+canvas.addEventListener('touchstart', (e) => {
+  e.preventDefault();
+  const t = e.touches[0];
+  for (let i = 0; i < 15; i++) {
+    hearts.push({
+      sx: t.clientX, sy: t.clientY, sz: 600 + Math.random() * 300,
+      tx: (Math.random() * 0.9 + 0.05) * W,
+      ty: (Math.random() * 0.8 + 0.05) * H,
+      tz: -150 - Math.random() * 200,
+      x: t.clientX, y: t.clientY, z: 600 + Math.random() * 300,
+      size: 20 + Math.random() * 40,
+      hue: 340 + Math.random() * 35,
+      progress: 0,
+      speed: 0.008 + Math.random() * 0.02,
+      rotation: Math.random() * Math.PI * 2,
+      rotSpeed: (Math.random() - 0.5) * 0.2,
+      opacity: 1,
+      burst: true,
+    });
+  }
+}, { passive: false });
+
+loop();
+</script>
+</body>
+</html>
