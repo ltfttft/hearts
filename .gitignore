@@ -1,0 +1,7 @@
+__pycache__/
+*.py
+*.txt
+*.html.html
+sectors_animation.html
+gomoku.py
+sector_animation.py
